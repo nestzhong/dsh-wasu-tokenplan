@@ -1,0 +1,7 @@
+# dsh-tokenplan-bill bundle patch: inserts the dual-face plugin row into the web
+# profile roster. Host half (exports ".") proxies wasu gateways and keeps tokens
+# on disk; dsh.client loads the browser half (exports "./client") for the
+# sidebar.footer.action entry + shell.overlay panel.
+- insert:
+    - id: tokenplan-bill
+      name: 'dsh-tokenplan-bill'

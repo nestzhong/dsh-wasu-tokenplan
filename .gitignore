@@ -1,0 +1,10 @@
+# dependencies / build output
+node_modules/
+dist/
+*.tgz
+
+# runtime state and logs (never commit credentials or session tokens)
+*.log
+.DS_Store
+tokenplan-bill-state.json
+.tokenplan-bill-state.json

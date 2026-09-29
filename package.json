@@ -1,0 +1,47 @@
+{
+  "name": "dsh-tokenplan-bill",
+  "version": "0.5.1",
+  "description": "华数 AI Store / Token Plan 费用中心：控制台、套餐、API 密钥、积分、订单、消息、云盘、AI作品；模型广场目录写入 dsh chat「华数模型」。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "tests",
+    "scripts",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "tokenplan",
+    "wasu",
+    "wasu-ai-store",
+    "credits",
+    "dashboard"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --test-force-exit \"tests/*.spec.mjs\"",
+    "verify": "node --test --test-force-exit \"tests/*.spec.mjs\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  }
+}

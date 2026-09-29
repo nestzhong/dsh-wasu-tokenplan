@@ -48,12 +48,15 @@
 本仓库以已构建的 `lib/` 提交分发（无需安装期构建脚本）：
 
 ```sh
+# GitHub（私有仓库，走本机 git 凭据）
+dsh plugin --profile web add github:nestzhong/dsh-tokenplan-bill
+
 # 本地目录
 dsh plugin --profile web add link:/path/to/dsh-tokenplan-bill
 
 # 或 tarball
 npm pack
-dsh plugin --profile web add ./dsh-tokenplan-bill-0.5.0.tgz
+dsh plugin --profile web add ./dsh-tokenplan-bill-0.5.1.tgz
 ```
 
 安装后 `dsh-tokenplan-bill` 会被写入 profile 的 `dsh.profile.bundles`，重启 `dsh web` 生效。

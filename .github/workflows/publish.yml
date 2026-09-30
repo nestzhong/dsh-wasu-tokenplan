@@ -73,9 +73,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "::error::缺少仓库 secret NPM_TOKEN，无法发布"
-            exit 1
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::warning::没有配置 NPM_TOKEN，dry-run 继续（不会真正发布）"
+            else
+              echo "::error::缺少仓库 secret NPM_TOKEN，无法发布"
+              exit 1
+            fi
+          else
+            # token 无效 / 过期 / 无发包权限时在这里就失败，而不是等到 publish 报 403
+            echo "NPM_TOKEN 对应的 npm 身份：$(npm whoami)"
           fi
 
           NAME=$(node -p "require('./package.json').name")

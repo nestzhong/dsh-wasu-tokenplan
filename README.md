@@ -1,10 +1,17 @@
-# dsh-tokenplan-bill
+# dsh-wasu-tokenplan
 
 **华数 AI Store / Token Plan 费用中心** —— DeepSeek Harness（DSH）插件，把
 [华数 AI Store 创作中心](https://tokenplan.wasu.cn/web/index.html#/) 的工作台能力集中到侧栏底部可拖拽面板，
 把「模型广场」的模型目录写进 dsh chat 的「华数模型」分组，并让对话窗口多出一个
 「画廊」页签 + 两个可直接生图/生视频的 Agent 工具。
 
+> v0.7.0 项目更名为 `dsh-wasu-tokenplan`（原 `dsh-tokenplan-bill`）。包名、插件行 id
+> （`wasu-tokenplan`）、浏览器路由前缀（`/dsh-wasu-tokenplan`）、侧栏 / 浮层 / 画廊槽位 id、
+> 状态文件（`~/.dsh/wasu-tokenplan-state.json`）与环境变量（`WASU_TOKENPLAN_STATE`、
+> `WASU_TOKENPLAN_POLL_MS`）全部换新，**不做旧名兼容**：升级后需重新登录一次华数账号，
+> 首次安装请先卸载旧包（`dsh plugin --profile web remove dsh-tokenplan-bill`）。
+> 上游站点 `tokenplan.wasu.cn` 与模型 provider id `wasu-tokenplan` 保持不变。
+>
 > v0.6.1 修复：`generate_image` / `generate_video` 的结果此前只进画廊、对话里看不到
 > （工具结果的 `output.render` 投影为空数组），现在成品会内联回填对话，并带一张结果卡片。
 >
@@ -52,7 +59,7 @@ AI 优化提示词、提交后实时轮询进度、缩略图预览与灯箱、�
 
 ### 3. 对话窗口「画廊」页签
 
-注册在 DSH 官方 `conversation.view` 槽位（`id: tokenplan-bill-gallery`、`order: 20`、标签「画廊」），
+注册在 DSH 官方 `conversation.view` 槽位（`id: wasu-tokenplan-gallery`、`order: 20`、标签「画廊」），
 数据来自 host 的 `GET /gallery`，它把两个上游合并成一份列表：
 
 | 来源 | 上游 |
@@ -129,22 +136,22 @@ AI 优化提示词、提交后实时轮询进度、缩略图预览与灯箱、�
 
 ```sh
 # GitHub（私有仓库，走本机 git 凭据）
-dsh plugin --profile web add github:nestzhong/dsh-tokenplan-bill
+dsh plugin --profile web add github:nestzhong/dsh-wasu-tokenplan
 
 # 本地目录
-dsh plugin --profile web add link:/path/to/dsh-tokenplan-bill
+dsh plugin --profile web add link:/path/to/dsh-wasu-tokenplan
 
 # 或 tarball
 npm pack
-dsh plugin --profile web add ./dsh-tokenplan-bill-0.6.1.tgz
+dsh plugin --profile web add ./dsh-wasu-tokenplan-0.7.0.tgz
 ```
 
-安装后 `dsh-tokenplan-bill` 会被写入 profile 的 `dsh.profile.bundles`，重启 `dsh web` 生效。
+安装后 `dsh-wasu-tokenplan` 会被写入 profile 的 `dsh.profile.bundles`，重启 `dsh web` 生效。
 
 ## 使用
 
 1. 侧栏底部点 **AI Store**
-2. 手机号 + 短信验证码登录（可选个人 / 企业），凭据存 `~/.dsh/tokenplan-bill-state.json`（0600）
+2. 手机号 + 短信验证码登录（可选个人 / 企业），凭据存 `~/.dsh/wasu-tokenplan-state.json`（0600）
 3. 登录成功后检查聊天区模型选择是否出现「华数模型」
 4. 左侧切换各功能页；`DSH模型配置` 页勾选模型后「累加到 DSH」
 5. `AI创作` 页直接生图 / 生视频；或在对话里直接说「生成一张…」「生成一段…视频」，
@@ -155,7 +162,7 @@ dsh plugin --profile web add ./dsh-tokenplan-bill-0.6.1.tgz
 
 ## Host 路由
 
-浏览器侧只与本机 host 通信，前缀 `/dsh-tokenplan-bill`：
+浏览器侧只与本机 host 通信，前缀 `/dsh-wasu-tokenplan`：
 
 ```
 GET  /manifest              会话 + 未读消息数 + 云盘用量（脱敏）
@@ -198,7 +205,7 @@ GET/POST /prefs             面板位置尺寸
 | `generate_image` | `prompt`(必填)、`model`、`aspect_ratio`、`resolution`、`image_count`、`negative_prompt`、`watermark`、`layer_split`、`source_attachment_ids`、`reference_urls` |
 | `generate_video` | `prompt`(必填)、`model`、`mode`、`aspect_ratio`、`resolution`、`duration`、`negative_prompt`、`watermark`、`source_attachment_ids`、`source_file_ids`、`reference_urls` |
 
-`TOKENPLAN_BILL_POLL_MS` 可覆盖轮询间隔（默认 5000ms），仅用于测试与探针。
+`WASU_TOKENPLAN_POLL_MS` 可覆盖轮询间隔（默认 5000ms），仅用于测试与探针。
 
 契约要点（踩过的坑）：工具定义里 **`output.render(args, value)` 才是模型可见内容**，
 `execute` 的返回值只是规范化值（会按 `output.schema` 校验），它本身不会变成工具结果。
@@ -263,7 +270,7 @@ node scripts/capture-all.mjs                  # 抓取各页响应样本
 
 ## 隐私
 
-账号 token 只保存在本机 host（`~/.dsh/tokenplan-bill-state.json`，0600），
+账号 token 只保存在本机 host（`~/.dsh/wasu-tokenplan-state.json`，0600），
 浏览器只见掩码状态；完整 API Key 仅在你主动显示/复制时使用。同步到 DSH 的 Key
 写入 `~/.dsh/.credentials.yaml`，不经浏览器。
 
@@ -271,7 +278,7 @@ node scripts/capture-all.mjs                  # 抓取各页响应样本
 转发到华数 `pcweb/creation/upload`，生成结果则通过 `pcweb/creation/tasks` 取回。
 两者都不会在未被要求时上传任何本地文件。
 
-`/dsh-tokenplan-bill/*` 与 DSH 面板同机同源，但**不走 DSH 的浏览器信任围栏**：
+`/dsh-wasu-tokenplan/*` 与 DSH 面板同机同源，但**不走 DSH 的浏览器信任围栏**：
 默认 `webserver.host` 为 `127.0.0.1`，请勿把该端口暴露到公网，否则本机 API Key
 列表、模型配置写入接口，以及 `POST /creation/submit`（会消耗积分）都会对网络开放。
 需要异地访问时，请改用反向代理加认证，并在代理层只放行 `/api/*` 等必要前缀。

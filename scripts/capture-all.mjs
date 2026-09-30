@@ -2,7 +2,7 @@
  * Capture live API samples for every console page of the rewritten site.
  * Usage: node scripts/capture-all.mjs
  *
- * Requires a logged-in state file at $DSH_HOME/tokenplan-bill-state.json
+ * Requires a logged-in state file at $DSH_HOME/wasu-tokenplan-state.json
  * (run `node scripts/live-probe.mjs login <phone> <code>` first).
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { buildTosEnvelope, unwrapResponse } from '../lib/index.js'
 
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
-const st = JSON.parse(readFileSync(join(DSH_HOME, 'tokenplan-bill-state.json'), 'utf8'))
+const st = JSON.parse(readFileSync(join(DSH_HOME, 'wasu-tokenplan-state.json'), 'utf8'))
 const HYYW = 'https://api-gateway.wasu.cn/hyyw/'
 const TOS = 'https://api-gateway.wasu.cn/tos/api/v1/open/'
 const channel = st.userType === 'enterprise' ? 'wasuAITokenEnterprise' : 'wasuAIToken'
@@ -84,7 +84,7 @@ const sample = {
 }
 
 mkdirSync(DSH_HOME, { recursive: true })
-const out = join(DSH_HOME, 'tokenplan-bill-all-sample.json')
+const out = join(DSH_HOME, 'wasu-tokenplan-all-sample.json')
 writeFileSync(out, JSON.stringify(sample, null, 2))
 for (const [k, v] of Object.entries(sample)) {
   if (v === null) {

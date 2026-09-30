@@ -66,11 +66,11 @@ import { join } from 'node:path'
 
 /**
  * Hermetic state: never read (or write) the developer's real
- * `~/.dsh/tokenplan-bill-state.json`. Without this the route-surface tests
+ * `~/.dsh/wasu-tokenplan-state.json`. Without this the route-surface tests
  * silently depend on whether the machine happens to be logged in.
  */
-const HERMETIC_STATE = join(mkdtempSync(join(tmpdir(), 'tokenplan-host-')), 'state.json')
-process.env.TOKENPLAN_BILL_STATE = HERMETIC_STATE
+const HERMETIC_STATE = join(mkdtempSync(join(tmpdir(), 'wasu-tokenplan-host-')), 'state.json')
+process.env.WASU_TOKENPLAN_STATE = HERMETIC_STATE
 process.on('exit', () => { try { rmSync(HERMETIC_STATE, { force: true }) } catch { /* best effort */ } })
 
 const DEFAULT_SECRET = 'fd0fbc3194ef00f5e132d8604ae04bf5'
@@ -578,13 +578,13 @@ describe('host route surface (apply + webServer registration)', () => {
     apply(ctx)
     assert.equal(registered.length, 1)
     assert.equal(registered[0].kind, 'prefix')
-    assert.equal(registered[0].path, '/dsh-tokenplan-bill')
+    assert.equal(registered[0].path, '/dsh-wasu-tokenplan')
     return registered[0].handler
   }
 
   it('registers one prefix route and answers /manifest', async () => {
     const handler = bootHost()
-    const r = await call(handler, 'GET', '/dsh-tokenplan-bill/manifest')
+    const r = await call(handler, 'GET', '/dsh-wasu-tokenplan/manifest')
     assert.equal(r.status, 200)
     assert.equal(r.json.ok, true)
     assert.equal(r.json.session.loggedIn, false)
@@ -595,7 +595,7 @@ describe('host route surface (apply + webServer registration)', () => {
   it('rejects unauthenticated console reads with 401', async () => {
     const handler = bootHost()
     for (const path of ['/models', '/keys', '/dashboard', '/messages', '/drive', '/creation/tasks']) {
-      const r = await call(handler, 'GET', '/dsh-tokenplan-bill' + path)
+      const r = await call(handler, 'GET', '/dsh-wasu-tokenplan' + path)
       assert.equal(r.status, 401, path)
       assert.equal(r.json.ok, false)
     }
@@ -603,29 +603,29 @@ describe('host route surface (apply + webServer registration)', () => {
 
   it('validates login input before calling upstream', async () => {
     const handler = bootHost()
-    const bad = await call(handler, 'POST', '/dsh-tokenplan-bill/auth/login', { phone: '123' })
+    const bad = await call(handler, 'POST', '/dsh-wasu-tokenplan/auth/login', { phone: '123' })
     assert.equal(bad.status, 400)
     assert.match(bad.json.error, /手机号/)
-    const sms = await call(handler, 'POST', '/dsh-tokenplan-bill/auth/sms', { phone: '123' })
+    const sms = await call(handler, 'POST', '/dsh-wasu-tokenplan/auth/sms', { phone: '123' })
     assert.equal(sms.status, 400)
   })
 
   it('answers unknown plugin paths with 404 JSON', async () => {
     const handler = bootHost()
-    const r = await call(handler, 'GET', '/dsh-tokenplan-bill/nope')
+    const r = await call(handler, 'GET', '/dsh-wasu-tokenplan/nope')
     assert.equal(r.status, 404)
     assert.equal(r.json.ok, false)
   })
 
   it('treats a wrong method as not found', async () => {
     const handler = bootHost()
-    const r = await call(handler, 'DELETE', '/dsh-tokenplan-bill/manifest')
+    const r = await call(handler, 'DELETE', '/dsh-wasu-tokenplan/manifest')
     assert.equal(r.status, 404)
   })
 
   it('reports an unauthenticated unread count without failing', async () => {
     const handler = bootHost()
-    const r = await call(handler, 'GET', '/dsh-tokenplan-bill/messages/unread')
+    const r = await call(handler, 'GET', '/dsh-wasu-tokenplan/messages/unread')
     assert.equal(r.status, 200)
     assert.equal(r.json.unread, 0)
     assert.equal(r.json.loggedIn, false)
@@ -679,7 +679,7 @@ describe('authenticated envelope (post-login session)', () => {
       'pcweb/user/detail': { nickname: '测试账号' },
     })
     const handler = bootHost()
-    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-tokenplan-bill/dashboard'))
+    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-wasu-tokenplan/dashboard'))
     assert.equal(r.status, 200, r.body)
     assert.equal(r.json.ok, true)
     assert.equal(r.json.loggedIn, true)
@@ -732,7 +732,7 @@ describe('authenticated envelope (post-login session)', () => {
       return OK([])
     }
     const handler = bootHost()
-    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-tokenplan-bill/dashboard'))
+    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-wasu-tokenplan/dashboard'))
     assert.equal(r.status, 200, r.body)
     assert.equal(r.json.loggedIn, true, 'a stale cloud pair must not log the user out')
     assert.equal(overviewCalls, 2, 'the call is retried once after re-bootstrapping')
@@ -743,7 +743,7 @@ describe('authenticated envelope (post-login session)', () => {
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     const { stub, seen } = makeUpstream({ 'pcweb/creation/models': [] })
     const handler = bootHost()
-    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-tokenplan-bill/creation/models'))
+    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-wasu-tokenplan/creation/models'))
     assert.equal(r.status, 200, r.body)
     assert.equal(seen.length, 1)
     assert.equal(seen[0].path, 'pcweb/creation/models')
@@ -757,7 +757,7 @@ describe('authenticated envelope (post-login session)', () => {
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     const { stub, seen } = makeUpstream({ 'pcweb/clouddisk/file/home': { total: 100, used: 20, free: 80 } })
     const handler = bootHost()
-    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-tokenplan-bill/drive'))
+    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-wasu-tokenplan/drive'))
     assert.equal(r.status, 200, r.body)
     const drive = seen.find((s) => s.path.startsWith('pcweb/clouddisk/'))
     assert.ok(drive, 'cloud call must have been made')
@@ -792,7 +792,7 @@ describe('authenticated envelope (post-login session)', () => {
       return { ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json' }), text: async () => '{}' }
     }
     const handler = bootHost()
-    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-tokenplan-bill/keys'))
+    const r = await withFetch(stub, () => call(handler, 'GET', '/dsh-wasu-tokenplan/keys'))
     assert.equal(r.status, 401)
     assert.equal(r.json.error, '登录已过期')
     seedState(null)
@@ -801,7 +801,7 @@ describe('authenticated envelope (post-login session)', () => {
   it('reports 未登录 when there is no stored session at all', async () => {
     seedState(null)
     const handler = bootHost()
-    const r = await call(handler, 'GET', '/dsh-tokenplan-bill/keys')
+    const r = await call(handler, 'GET', '/dsh-wasu-tokenplan/keys')
     assert.equal(r.status, 401)
     assert.equal(r.json.error, '未登录')
   })
@@ -1103,7 +1103,7 @@ describe('ai creation routes', () => {
   })
   const call = async (handler, method, path, body) => {
     const res = makeRes()
-    await handler(makeReq(method, '/dsh-tokenplan-bill' + path, body), res)
+    await handler(makeReq(method, '/dsh-wasu-tokenplan' + path, body), res)
     let json = null
     try { json = JSON.parse(res.body) } catch { /* non-JSON */ }
     return { status: res.statusCode, json, body: res.body }
@@ -1483,7 +1483,7 @@ describe('generation tools', () => {
   const exec = (agent) => ({ agent, signal: new AbortController().signal, callId: 'c1', name: 'x', arguments: {} })
 
   it('uploads conversation images, submits, polls and attaches the result', async () => {
-    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    process.env.WASU_TOKENPLAN_POLL_MS = '1'
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     const { stub, seen } = makeUpstream({ prompt: '一只猫' })
     const { tools, saved } = bootHost()
@@ -1528,11 +1528,11 @@ describe('generation tools', () => {
     assert.equal(meta.taskId, 'gen_new')
     assert.deepEqual(meta.urls, ['https://file.smartlink.wasu.cn/group1/out.png'])
     seedState(null)
-    delete process.env.TOKENPLAN_BILL_POLL_MS
+    delete process.env.WASU_TOKENPLAN_POLL_MS
   })
 
   it('attaches every produced image of a multi-image batch', async () => {
-    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    process.env.WASU_TOKENPLAN_POLL_MS = '1'
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     let tasksRead = 0
     const stub = async (url, init) => {
@@ -1579,11 +1579,11 @@ describe('generation tools', () => {
       'https://file.smartlink.wasu.cn/group1/c.png',
     ])
     seedState(null)
-    delete process.env.TOKENPLAN_BILL_POLL_MS
+    delete process.env.WASU_TOKENPLAN_POLL_MS
   })
 
   it('submits without references when the conversation carries no attachment', async () => {
-    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    process.env.WASU_TOKENPLAN_POLL_MS = '1'
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     const { stub, seen } = makeUpstream({ prompt: '一只猫' })
     const { tools } = bootHost()
@@ -1595,11 +1595,11 @@ describe('generation tools', () => {
     const submit = seen.find((s) => s.path === 'pcweb/creation/submit')
     assert.equal(submit.envelope.params.referenceFiles, undefined)
     seedState(null)
-    delete process.env.TOKENPLAN_BILL_POLL_MS
+    delete process.env.WASU_TOKENPLAN_POLL_MS
   })
 
   it('surfaces a failed task instead of a bogus success', async () => {
-    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    process.env.WASU_TOKENPLAN_POLL_MS = '1'
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     const { stub } = makeUpstream({ status: 'failed', prompt: '一只猫' })
     const { tools } = bootHost()
@@ -1611,7 +1611,7 @@ describe('generation tools', () => {
       )
     })
     seedState(null)
-    delete process.env.TOKENPLAN_BILL_POLL_MS
+    delete process.env.WASU_TOKENPLAN_POLL_MS
   })
 
   it('refuses to generate while the AI Store session is absent', async () => {
@@ -1622,7 +1622,7 @@ describe('generation tools', () => {
   })
 
   it('derives the video mode from the reference material the user attached', async () => {
-    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    process.env.WASU_TOKENPLAN_POLL_MS = '1'
     seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
     const { stub, seen } = makeUpstream({
       prompt: '动起来',
@@ -1651,7 +1651,7 @@ describe('generation tools', () => {
     assert.equal(submit.envelope.params.videoMode, 'file_upload')
     assert.deepEqual(submit.envelope.params.referenceFiles, [{ type: 'file', url: 'app/U1/ref.png' }])
     seedState(null)
-    delete process.env.TOKENPLAN_BILL_POLL_MS
+    delete process.env.WASU_TOKENPLAN_POLL_MS
   })
 })
 

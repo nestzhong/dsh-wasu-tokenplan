@@ -10,7 +10,7 @@
  *   node scripts/live-probe.mjs drive
  *   node scripts/live-probe.mjs signcheck
  *
- * Auth state is read from (and written to) $DSH_HOME/tokenplan-bill-state.json,
+ * Auth state is read from (and written to) $DSH_HOME/wasu-tokenplan-state.json,
  * the same file the plugin uses.
  */
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
@@ -21,7 +21,7 @@ import { buildTosEnvelope, unwrapResponse } from '../lib/index.js'
 const HYYW = 'https://api-gateway.wasu.cn/hyyw/'
 const TOS = 'https://api-gateway.wasu.cn/tos/api/v1/open/'
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
-const STATE = join(DSH_HOME, 'tokenplan-bill-state.json')
+const STATE = join(DSH_HOME, 'wasu-tokenplan-state.json')
 
 const cmd = process.argv[2] || 'help'
 const phone = process.argv[3] || ''

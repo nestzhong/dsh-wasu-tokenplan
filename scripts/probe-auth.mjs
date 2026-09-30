@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { buildTosEnvelope } from '../lib/index.js'
 
-const STATE = process.argv[2] || join(homedir(), '.dsh', 'tokenplan-bill-state.json')
+const STATE = process.argv[2] || join(homedir(), '.dsh', 'wasu-tokenplan-state.json')
 const state = JSON.parse(readFileSync(STATE, 'utf8'))
 const token = String(state.accessToken || '')
 const DEFAULT_SECRET = 'fd0fbc3194ef00f5e132d8604ae04bf5'

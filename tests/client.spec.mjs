@@ -70,10 +70,10 @@ function routes(extra = []) {
   // Extras come first so an override wins over the default route.
   return [
     ...extra,
-    ['/dsh-tokenplan-bill/manifest', MANIFEST],
-    ['/dsh-tokenplan-bill/prefs', { ok: true, prefs: {} }],
-    ['/dsh-tokenplan-bill/dashboard', DASHBOARD],
-    ['/dsh-tokenplan-bill/packages', {
+    ['/dsh-wasu-tokenplan/manifest', MANIFEST],
+    ['/dsh-wasu-tokenplan/prefs', { ok: true, prefs: {} }],
+    ['/dsh-wasu-tokenplan/dashboard', DASHBOARD],
+    ['/dsh-wasu-tokenplan/packages', {
       ok: true,
       isEnterprise: false,
       canBuyBoost: true,
@@ -89,7 +89,7 @@ function routes(extra = []) {
         canSubscribe: true,
       }],
     }],
-    ['/dsh-tokenplan-bill/keys', {
+    ['/dsh-wasu-tokenplan/keys', {
       ok: true,
       endpoint: 'https://token.wasu.cn/v1',
       list: [{
@@ -103,7 +103,7 @@ function routes(extra = []) {
         createdTime: '2026-09-01 10:00:00',
       }],
     }],
-    ['/dsh-tokenplan-bill/credits', {
+    ['/dsh-wasu-tokenplan/credits', {
       ok: true,
       credit: {
         packages: [{
@@ -130,7 +130,7 @@ function routes(extra = []) {
         size: 10,
       },
     }],
-    ['/dsh-tokenplan-bill/orders', {
+    ['/dsh-wasu-tokenplan/orders', {
       ok: true,
       list: [{
         tradeSn: 'T20260901001',
@@ -146,7 +146,7 @@ function routes(extra = []) {
       page: 1,
       size: 10,
     }],
-    ['/dsh-tokenplan-bill/logs', {
+    ['/dsh-wasu-tokenplan/logs', {
       ok: true,
       list: [{
         createdAt: '2026-09-28 12:00:00',
@@ -160,8 +160,8 @@ function routes(extra = []) {
       page: 1,
       size: 10,
     }],
-    ['/dsh-tokenplan-bill/messages/unread', { ok: true, unread: 3 }],
-    ['/dsh-tokenplan-bill/messages', {
+    ['/dsh-wasu-tokenplan/messages/unread', { ok: true, unread: 3 }],
+    ['/dsh-wasu-tokenplan/messages', {
       ok: true,
       list: [{
         id: 11,
@@ -178,7 +178,7 @@ function routes(extra = []) {
       page: 1,
       size: 10,
     }],
-    ['/dsh-tokenplan-bill/drive', {
+    ['/dsh-wasu-tokenplan/drive', {
       ok: true,
       usage: {
         total: 1073741824,
@@ -194,7 +194,7 @@ function routes(extra = []) {
         albumsText: '0 B',
       },
     }],
-    ['/dsh-tokenplan-bill/creation/tasks', {
+    ['/dsh-wasu-tokenplan/creation/tasks', {
       ok: true,
       list: [{
         id: 't1',
@@ -214,7 +214,7 @@ function routes(extra = []) {
       page: 1,
       size: 24,
     }],
-    ['/dsh-tokenplan-bill/creation/models', {
+    ['/dsh-wasu-tokenplan/creation/models', {
       ok: true,
       list: [
         {
@@ -249,7 +249,7 @@ function routes(extra = []) {
         },
       ],
     }],
-    ['/dsh-tokenplan-bill/gallery', {
+    ['/dsh-wasu-tokenplan/gallery', {
       ok: true,
       items: [
         {
@@ -281,22 +281,22 @@ function routes(extra = []) {
       counts: { all: 2, image: 1, video: 1, file: 0, pending: 0 },
       sources: { drive: { ok: true, total: 1 }, tasks: { ok: true, total: 1 } },
     }],
-    ['/dsh-tokenplan-bill/creation/submit', {
+    ['/dsh-wasu-tokenplan/creation/submit', {
       ok: true,
       submitted: true,
       request: { kind: 'image', model: 'doubao-seedream-5.0-pro', estimatedCost: 300 },
     }],
-    ['/dsh-tokenplan-bill/creation/upload', {
+    ['/dsh-wasu-tokenplan/creation/upload', {
       ok: true,
       filePath: 'app/U1/ref.png',
       fileName: 'ref.png',
       size: 12,
     }],
-    ['/dsh-tokenplan-bill/creation/optimize-prompt', {
+    ['/dsh-wasu-tokenplan/creation/optimize-prompt', {
       ok: true,
       prompt: '一只坐在窗台上的猫，柔和晨光',
     }],
-    ['/dsh-tokenplan-bill/models', MODELS],
+    ['/dsh-wasu-tokenplan/models', MODELS],
   ]
 }
 
@@ -328,9 +328,9 @@ describe('client bundle contract', () => {
       'tool.call.toolview',
       'tool.call.toolview',
     ])
-    assert.equal(registered[0].descriptor.id, 'tokenplan-bill-entry')
-    assert.equal(registered[1].descriptor.id, 'tokenplan-bill-panel')
-    assert.equal(registered[2].descriptor.id, 'tokenplan-bill-gallery')
+    assert.equal(registered[0].descriptor.id, 'wasu-tokenplan-entry')
+    assert.equal(registered[1].descriptor.id, 'wasu-tokenplan-panel')
+    assert.equal(registered[2].descriptor.id, 'wasu-tokenplan-gallery')
     assert.equal(registered[2].descriptor.order, 20)
     assert.equal(registered[2].descriptor.label(), '画廊')
     // Keyed by wire tool name: the seat dispatches one tool call to one card.
@@ -368,7 +368,7 @@ describe('client bundle contract', () => {
     const ctx = createContextStub(slots)
     exports.apply(ctx)
     assert.equal(appended.length, 1)
-    assert.equal(appended[0].attrs['data-plugin'], 'dsh-tokenplan-bill')
+    assert.equal(appended[0].attrs['data-plugin'], 'dsh-wasu-tokenplan')
     assert.match(appended[0].textContent, /\.dsh-tp-panel/)
     ctx.effects[0].dispose()
     assert.deepEqual(removed, appended)
@@ -431,7 +431,7 @@ describe('panel', () => {
 
   it('shows the login form when logged out', async () => {
     const harness = loadClient({
-      routes: routes([['/dsh-tokenplan-bill/manifest', {
+      routes: routes([['/dsh-wasu-tokenplan/manifest', {
         ok: true, version: '0.5.0', session: { loggedIn: false }, unread: 0, drive: null,
       }]]),
     })
@@ -591,7 +591,7 @@ describe('AI创作 generator interactions', () => {
     submit.props.onClick()
     tree = await settle(harness, el)
 
-    const body = postBody(harness, '/dsh-tokenplan-bill/creation/submit')
+    const body = postBody(harness, '/dsh-wasu-tokenplan/creation/submit')
     assert.ok(body, 'submitting must POST to the creation endpoint')
     assert.equal(body.kind, 'image')
     assert.equal(body.model, 'doubao-seedream-5.0-pro')
@@ -620,7 +620,7 @@ describe('AI创作 generator interactions', () => {
 
     // The picked file is uploaded through the host, and only the object key
     // travels with the generation request.
-    const upload = JSON.parse(harness.calls.find((c) => c.url === '/dsh-tokenplan-bill/creation/upload').body)
+    const upload = JSON.parse(harness.calls.find((c) => c.url === '/dsh-wasu-tokenplan/creation/upload').body)
     assert.equal(upload.name, 'ref.png')
     assert.equal(upload.contentType, 'image/png')
     assert.match(upload.data, /^data:image\/png;base64,/)
@@ -631,7 +631,7 @@ describe('AI创作 generator interactions', () => {
     buttonWith(tree, '生成图片').props.onClick()
     tree = await settle(harness, el)
 
-    const body = postBody(harness, '/dsh-tokenplan-bill/creation/submit')
+    const body = postBody(harness, '/dsh-wasu-tokenplan/creation/submit')
     assert.deepEqual(body.referenceFiles, [{ type: 'reference', url: 'app/U1/ref.png' }])
   })
 
@@ -650,7 +650,7 @@ describe('AI创作 generator interactions', () => {
     buttonWith(tree, '生成视频').props.onClick()
     tree = await settle(harness, el)
 
-    const body = postBody(harness, '/dsh-tokenplan-bill/creation/submit')
+    const body = postBody(harness, '/dsh-wasu-tokenplan/creation/submit')
     assert.equal(body.kind, 'video')
     assert.equal(body.model, 'doubao-seedance-2.5')
     assert.equal(body.duration, 5)
@@ -668,7 +668,7 @@ describe('AI创作 generator interactions', () => {
     buttonWith(tree, 'AI 优化提示词').props.onClick()
     tree = await settle(harness, el)
 
-    const body = postBody(harness, '/dsh-tokenplan-bill/creation/optimize-prompt')
+    const body = postBody(harness, '/dsh-wasu-tokenplan/creation/optimize-prompt')
     assert.deepEqual(body, { prompt: '猫', kind: 'image' })
     assert.equal(findAll(tree, 'textarea')[0].props.value, '一只坐在窗台上的猫，柔和晨光')
   })
@@ -705,7 +705,7 @@ describe('inline generation result card', () => {
     bytes: 2048,
     width: 1024,
     height: 1024,
-    name: 'tokenplan-gen_1-1',
+    name: 'wasu-tokenplan-gen_1-1',
   }
 
   /** A settled tool block exactly as the session log carries one. */
@@ -804,7 +804,7 @@ describe('inline generation result card', () => {
         call: { name: 'generate_video', argsRaw: '{"prompt":"动起来"}' },
         content: [
           { type: 'text', text: '视频生成完成' },
-          { type: 'file', attachment: { attachmentId: 'sha256:vid', name: 'tokenplan-gen_2.mp4', bytes: 4096 } },
+          { type: 'file', attachment: { attachmentId: 'sha256:vid', name: 'wasu-tokenplan-gen_2.mp4', bytes: 4096 } },
         ],
         meta: {
           kind: 'video',

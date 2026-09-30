@@ -6,8 +6,8 @@ dist/
 # runtime state and logs (never commit credentials or session tokens)
 *.log
 .DS_Store
-tokenplan-bill-state.json
-.tokenplan-bill-state.json
+wasu-tokenplan-state.json
+.wasu-tokenplan-state.json
 
 # local generation output from manual testing
 generated/

@@ -2,7 +2,7 @@
  * Host-half unit tests: TOS envelope protocol (apiVersion 4), response
  * unwrapping, catalog normalization and the panel-facing label helpers.
  */
-import { describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { apply } from '../lib/index.js'
@@ -72,6 +72,13 @@ import { join } from 'node:path'
 const HERMETIC_STATE = join(mkdtempSync(join(tmpdir(), 'wasu-tokenplan-host-')), 'state.json')
 process.env.WASU_TOKENPLAN_STATE = HERMETIC_STATE
 process.on('exit', () => { try { rmSync(HERMETIC_STATE, { force: true }) } catch { /* best effort */ } })
+
+/**
+ * `assetTime` renders epoch timestamps in the *local* timezone, exactly like the
+ * site does. Pin the timezone so assertions on wall-clock strings do not drift
+ * with the runner (CI is UTC, dev machines here are +08:00).
+ */
+process.env.TZ = 'Asia/Shanghai'
 
 const DEFAULT_SECRET = 'fd0fbc3194ef00f5e132d8604ae04bf5'
 
@@ -1393,6 +1400,18 @@ describe('generation tools', () => {
   const TOKEN = 'JWT.ACCOUNT.TOKEN'
   const ACCESS_KEY = 'cloud-access-key-64'
   const CSRF = 'cloud-csrf-64'
+
+  /**
+   * The creation poll loop sleeps through an unref'd setTimeout, on purpose: a
+   * long video poll must not keep the host process alive. Under node:test that
+   * same timer is the *only* pending work, so Node 20/22 declares the event
+   * loop finished and cancels the still-pending test ("Promise resolution is
+   * still pending but the event loop has already resolved"). Hold one ref'd
+   * interval per test so the loop stays alive while the poll is awaited.
+   */
+  let keepAlive
+  beforeEach(() => { keepAlive = setInterval(() => {}, 5) })
+  afterEach(() => { clearInterval(keepAlive) })
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   const MODEL = {
     modelName: 'doubao-seedream-5.0-pro',
@@ -1657,6 +1676,11 @@ describe('generation tools', () => {
 
 describe('generation tool cancellation', () => {
   const TOKEN = 'JWT.ACCOUNT.TOKEN'
+
+  // Same unref'd polling timer as in 'generation tools': keep the loop alive.
+  let keepAlive
+  beforeEach(() => { keepAlive = setInterval(() => {}, 5) })
+  afterEach(() => { clearInterval(keepAlive) })
   const MODEL = {
     modelName: 'doubao-seedream-5.0-pro',
     modelType: 'image',

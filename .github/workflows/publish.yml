@@ -1,0 +1,139 @@
+name: Publish to npm
+
+# 只手动触发：在 GitHub → Actions → Publish to npm → Run workflow 里点一次才发版。
+# 发版前会先在当前 package.json 的版本上跑完整测试，测试不过不发布。
+#
+# 前置条件（已配置）：仓库 secret `NPM_TOKEN`
+#   - npm 账号开启 2FA 时，必须用 Automation token，或 Granular access token 并勾选
+#     「Bypass 2FA」，否则 npm publish 会报 EOTP / 403。
+#   - token 权限至少需要 read+write 该包（首次发布需能新建包）。
+#
+# 注意：本仓库是私有仓库，因此**不能**使用 npm provenance（GitHub 已停止支持从私有源
+# 仓库生成 provenance）。若将来仓库转为公开，可给 publish 步骤加上 `--provenance`
+# 并为本 job 声明 `id-token: write`。
+
+on:
+  workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: npm dist-tag（正式版选 latest，预发布选 next/beta）
+        type: choice
+        options:
+          - latest
+          - next
+          - beta
+        default: latest
+      dry_run:
+        description: 只预演（npm publish --dry-run），不真正发版
+        type: boolean
+        default: false
+      create_release:
+        description: 发布成功后打 v<version> tag 并创建 GitHub Release
+        type: boolean
+        default: true
+
+# 同一时间只允许一个发布流程，避免并发推送同一个版本号
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: test & publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # 只有 create_release 步骤需要写权限（打 tag / 建 Release）
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # gh release create 针对本次运行的确切 commit
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          # 本包零依赖且无 lockfile，所以不缓存 node_modules，也不需要 npm ci
+
+      - name: Run tests (publish gate)
+        run: npm test
+
+      - name: Check version and token
+        id: version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.dry_run }}" != "true" ] && [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::缺少仓库 secret NPM_TOKEN，无法发布"
+            exit 1
+          fi
+
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "打包版本：$NAME@$VERSION（dist-tag: ${{ inputs.npm_tag }}）"
+
+          # npm view 成功 = 该版本已发布；E404/Not Found = 还没发布；
+          # 其他报错（网络、registry、缓存）一律当成真失败，不要误判为「可以发布」。
+          if VIEW_OUT=$(npm view "$NAME@$VERSION" version 2>&1); then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::warning::$NAME@$VERSION 已存在于 npm，dry-run 会因此失败"
+            else
+              echo "::error::$NAME@$VERSION 已存在于 npm，请先在 package.json 里提升版本号并提交"
+              exit 1
+            fi
+          elif ! printf '%s' "$VIEW_OUT" | grep -qE 'E404|Not Found|404 Not Found'; then
+            echo "::error::无法确认 $NAME@$VERSION 在 npm 上的状态"
+            printf '%s\n' "$VIEW_OUT"
+            exit 1
+          fi
+
+          echo "---- 将要发布的文件 ----"
+          npm pack --dry-run
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "::notice::dry-run 模式：不会真正发布"
+            npm publish --dry-run --access public --tag "${{ inputs.npm_tag }}"
+          else
+            npm publish --access public --tag "${{ inputs.npm_tag }}"
+            echo "::notice::已发布 ${{ steps.version.outputs.name }}@${{ steps.version.outputs.version }}（${{ inputs.npm_tag }}）"
+          fi
+
+      - name: Tag and create GitHub Release
+        # 用 github.event.inputs（永远是字符串）判断，避免 boolean 输入的类型歧义
+        if: ${{ github.event.inputs.dry_run != 'true' && github.event.inputs.create_release != 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG 已存在，跳过"
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --target "$GITHUB_SHA"
+
+          echo "::notice::已创建 Release $TAG"

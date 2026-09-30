@@ -39,6 +39,20 @@ import {
   formatBytes,
   normalizeDriveUsage,
   normalizeCreationTask,
+  normalizeCreationModel,
+  normalizeAiAsset,
+  normalizeAiAssetPage,
+  assetTime,
+  creationTaskToGalleryItem,
+  creationCost,
+  isCreationPending,
+  parseJsonField,
+  cleanMediaUrl,
+  guessReferenceType,
+  guessContentType,
+  guessExtension,
+  imageMediaTypeFrom,
+  fileExtension,
   HUASHU_PROVIDER_ID,
   HUASHU_DISPLAY_NAME,
   HUASHU_BASE_URL,
@@ -791,5 +805,916 @@ describe('authenticated envelope (post-login session)', () => {
     assert.equal(r.status, 401)
     assert.equal(r.json.error, '未登录')
   })
+  })
+})
+
+/**
+ * AI创作 (pcweb/creation/*) and 我的云盘-AI作品 (pcweb/clouddisk/file/ai-assets).
+ */
+describe('ai creation model catalog', () => {
+  const ROW = {
+    modelId: 96,
+    modelName: 'doubao-seedream-5.0-pro',
+    modelType: 'image',
+    vendor: '豆包AI',
+    modelIcon: 'https://cdn/icon.png',
+    description: '图像创作模型',
+    imageQuotaPerUnit: 300,
+    modelParams: {
+      resolutions: ['1k', '2K'],
+      ratios: ['1:1', '16:9'],
+      maxImages: 4,
+      durations: [],
+      capabilities: ['layer_split', 'smart_edit'],
+      extraConfig: { supports_reference: true },
+    },
+  }
+
+  it('normalizes the model row into generator form options', () => {
+    const m = normalizeCreationModel(ROW)
+    assert.equal(m.id, 'doubao-seedream-5.0-pro')
+    assert.equal(m.kind, 'image')
+    assert.equal(m.imagePrice, 300)
+    assert.deepEqual(m.ratios, ['1:1', '16:9'])
+    assert.deepEqual(m.resolutions, ['1k', '2K'])
+    assert.equal(m.maxImages, 4)
+    assert.equal(m.supports.layerSplit, true)
+    assert.equal(m.supports.smartEdit, true)
+    // A model that never advertises video support stays false, not undefined.
+    assert.equal(m.supports.textToVideo, false)
+  })
+
+  it('reads video capability flags from either the boolean or the capability list', () => {
+    const m = normalizeCreationModel({
+      modelName: 'doubao-seedance-2.5',
+      modelType: 'video',
+      videoQuotaPerSecond: 6350,
+      modelParams: { durations: [5, 10, 15], capabilities: ['text_to_video', 'image_to_video'], extraConfig: { supports_audio: 1 } },
+    })
+    assert.equal(m.kind, 'video')
+    assert.equal(m.videoPrice, 6350)
+    assert.deepEqual(m.durations, [5, 10, 15])
+    assert.equal(m.supports.imageToVideo, true)
+    assert.equal(m.supports.firstLastFrame, false)
+    assert.equal(m.supports.audio, true)
+  })
+
+  it('drops rows without an id and prices images against a count', () => {
+    assert.equal(normalizeCreationModel({ modelId: 1 }), null)
+    assert.equal(normalizeCreationModel(null), null)
+    const m = normalizeCreationModel(ROW)
+    assert.equal(creationCost(m, { imageCount: 3 }), 900)
+    assert.equal(creationCost(m, {}), 300, 'one image is the default')
+    const v = normalizeCreationModel({ modelName: 'v', modelType: 'video', videoQuotaPerSecond: 6350, modelParams: {} })
+    assert.equal(creationCost(v, { duration: 10 }), 63500)
+  })
+})
+
+describe('ai creation task normalization', () => {
+  it('prefers the permanent local copy over the signed remote URL', () => {
+    const t = normalizeCreationTask({
+      taskId: 'gen_1',
+      templateType: 'VIDEO',
+      status: 'succeeded',
+      modelName: 'doubao-seedance-2.5',
+      prompt: '一只猫在跑',
+      resultUrls: '["https://dashscope.oss-accelerate.aliyuncs.com/a.mp4?Expires=1&Signature=x"]',
+      localResultUrls: '["`https://file.smartlink.wasu.cn/group1/M00/a.mp4`"]',
+      paramsConfig: '{"ratio":"16:9","resolutionLabel":"1080p","duration":5,"watermark":false}',
+      createdTime: '2026-09-28 12:00:00',
+    })
+    assert.equal(t.kind, 'video')
+    assert.deepEqual(t.urls, ['https://file.smartlink.wasu.cn/group1/M00/a.mp4'])
+    assert.equal(t.cover, 'https://file.smartlink.wasu.cn/group1/M00/a.mp4')
+    assert.equal(t.expiredRemote, false)
+    assert.equal(t.localUrls.length, 1)
+    assert.equal(t.ratio, '16:9')
+    assert.equal(t.resolution, '1080p')
+    assert.equal(t.duration, '5')
+    assert.equal(t.watermark, false)
+    assert.equal(t.pending, false)
+    assert.deepEqual(t.media, [{ url: 'https://file.smartlink.wasu.cn/group1/M00/a.mp4', kind: 'video' }])
+  })
+
+  it('flags a row that only carries the expiring remote URL', () => {
+    const t = normalizeCreationTask({ taskId: 'gen_2', resultUrls: '["https://x.aliyuncs.com/a.png"]' })
+    assert.equal(t.expiredRemote, true)
+    assert.deepEqual(t.urls, ['https://x.aliyuncs.com/a.png'])
+  })
+
+  it('marks in-flight tasks pending and surfaces the failure reason', () => {
+    const running = normalizeCreationTask({ taskId: 'g3', status: 'processing', progress: '40%' })
+    assert.equal(running.pending, true)
+    assert.equal(running.progress, '40%')
+    const failed = normalizeCreationTask({ taskId: 'g4', status: 'failed', errorMessageUser: '内容审核未通过' })
+    assert.equal(failed.pending, false)
+    assert.equal(failed.error, '内容审核未通过')
+  })
+
+  it('tolerates malformed payloads', () => {
+    const t = normalizeCreationTask({ taskId: 9, resultUrls: 'not-json', paramsConfig: '{' })
+    assert.deepEqual(t.urls, [])
+    assert.equal(t.cover, '')
+    assert.equal(t.kind, 'image')
+    assert.equal(normalizeCreationTask(null), null)
+    assert.equal(isCreationPending('SUCCEEDED'), false)
+    assert.equal(isCreationPending('pending'), true)
+  })
+
+  it('projects a task onto the shared gallery item shape', () => {
+    const item = creationTaskToGalleryItem(normalizeCreationTask({
+      taskId: 'gen_5',
+      status: 'succeeded',
+      modelName: 'qwen-image-2.0-pro',
+      prompt: '一只猫',
+      localResultUrls: '["https://file.smartlink.wasu.cn/a.png"]',
+      paramsConfig: '{"ratio":"1:1","imageCount":2}',
+      createdTime: '2026-09-28 12:00:00',
+    }))
+    assert.equal(item.id, 'task:gen_5')
+    assert.equal(item.source, 'tasks')
+    assert.equal(item.kind, 'image')
+    assert.equal(item.url, 'https://file.smartlink.wasu.cn/a.png')
+    assert.equal(item.meta, '1:1 · 2张')
+  })
+
+  it('parses both pre-decoded and JSON-encoded fields', () => {
+    assert.deepEqual(parseJsonField(['a'], []), ['a'])
+    assert.deepEqual(parseJsonField('["a"]', []), ['a'])
+    assert.deepEqual(parseJsonField('nope', []), [])
+    assert.deepEqual(parseJsonField('', ['fallback']), ['fallback'])
+    assert.equal(cleanMediaUrl('`https://x/a.png`'), 'https://x/a.png')
+  })
+})
+
+describe('cloud-drive AI作品 rows', () => {
+  it('decodes fileType into image/video/file and keeps the object key', () => {
+    const image = normalizeAiAsset({
+      fileId: 7,
+      name: '创意图-01.png',
+      fileType: 1,
+      fileAddress: 'app/U1/20260930/ali/a.png',
+      fileSize: 2_097_152,
+      createTime: '2026-09-30 09:00:00',
+    })
+    assert.equal(image.id, 'asset:7')
+    assert.equal(image.source, 'drive')
+    assert.equal(image.kind, 'image')
+    assert.equal(image.key, 'app/U1/20260930/ali/a.png')
+    assert.equal(image.meta, '2 MB')
+    assert.equal(image.title, '创意图-01.png')
+
+    const video = normalizeAiAsset({ fileId: 8, fileType: 2, fileAddress: 'app/U1/v.mp4', videoTime: 12 })
+    assert.equal(video.kind, 'video')
+    assert.equal(video.duration, '12')
+
+    const doc = normalizeAiAsset({ fileId: 9, fileType: 9, fileAddress: 'app/U1/d.pdf' })
+    assert.equal(doc.kind, 'file')
+    assert.equal(normalizeAiAsset(null), null)
+  })
+
+  it('turns the drive epoch timestamp into the same shape creation records use', () => {
+    // Live rows carry epoch milliseconds; without this the merged gallery
+    // compares "1790731602000" against "2026-09-30 09:00:00" and renders the
+    // raw number as the item's time.
+    const epoch = new Date(2026, 8, 30, 9, 26, 42).getTime()
+    const item = normalizeAiAsset({ fileId: 7, fileType: 1, fileAddress: 'app/U1/a.png', createTime: epoch })
+    assert.equal(item.createdAt, '2026-09-30 09:26:42')
+    assert.equal(normalizeAiAsset({ fileId: 8, fileType: 1, fileAddress: 'app/U1/b.png', createTime: '2026-09-30 09:00:00' }).createdAt, '2026-09-30 09:00:00')
+    assert.equal(normalizeAiAsset({ fileId: 9, fileType: 1, fileAddress: 'app/U1/c.png' }).createdAt, '')
+    assert.equal(assetTime(1790731602), '2026-09-30 09:26:42')
+  })
+
+  it('normalizes the {counts, files:{list,total,pageNum}} envelope', () => {
+    const page = normalizeAiAssetPage({
+      counts: { doc: 1, photos: 2, videos: 3 },
+      files: { pageNum: 1, total: 6, list: [{ fileId: 1, fileType: 1, fileAddress: 'a/b.png' }] },
+    })
+    assert.equal(page.items.length, 1)
+    assert.equal(page.total, 6)
+    assert.deepEqual(page.counts, { all: 6, image: 2, video: 3, file: 1 })
+    const empty = normalizeAiAssetPage({ counts: { total: null, doc: 0, photos: 0, videos: 0 }, files: { pageNum: 1, total: 0, list: [] } })
+    assert.deepEqual(empty.items, [])
+    assert.equal(empty.total, 0)
+  })
+})
+
+describe('reference material helpers', () => {
+  it('classifies conversation attachments the way the AI创作 video page does', () => {
+    assert.equal(guessReferenceType('a.png', 'image/png'), 'reference')
+    assert.equal(guessReferenceType('clip.mp4', 'video/mp4'), 'file')
+    assert.equal(guessReferenceType('song.mp3', ''), 'audio')
+    assert.equal(guessReferenceType('mystery.bin', ''), 'reference')
+    assert.equal(guessContentType('clip.mov'), 'video/quicktime')
+    assert.equal(guessContentType('mystery.bin'), 'application/octet-stream')
+    assert.equal(guessExtension('https://x/a.webm?x=1'), '.webm')
+    assert.equal(guessExtension('https://x/noext'), '.mp4')
+    assert.equal(fileExtension('a/b.PNG?v=2'), '.png')
+  })
+
+  it('sniffs raster media types from magic bytes', () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    assert.equal(imageMediaTypeFrom(png), 'image/png')
+    assert.equal(imageMediaTypeFrom(Buffer.from([0xff, 0xd8, 0xff, 0x00])), 'image/jpeg')
+    assert.equal(imageMediaTypeFrom(Buffer.from('GIF89a....')), 'image/gif')
+    assert.equal(imageMediaTypeFrom(Buffer.from([1, 2, 3])), '')
+  })
+})
+
+/**
+ * Route-level cover for the creation/gallery surface: what the panel and the
+ * generation tools actually put on the wire.
+ */
+describe('ai creation routes', () => {
+  const TOKEN = 'JWT.ACCOUNT.TOKEN'
+  const ACCESS_KEY = 'cloud-access-key-64'
+  const CSRF = 'cloud-csrf-64'
+  const IMAGE_MODEL = {
+    modelName: 'doubao-seedream-5.0-pro',
+    modelType: 'image',
+    imageQuotaPerUnit: 300,
+    modelParams: { ratios: ['1:1', '16:9'], resolutions: ['1k', '2K'], maxImages: 4, capabilities: [] },
+  }
+  const VIDEO_MODEL = {
+    modelName: 'doubao-seedance-2.5',
+    modelType: 'video',
+    videoQuotaPerSecond: 6350,
+    modelParams: { ratios: ['16:9'], resolutions: ['720p'], durations: [5, 10], capabilities: ['text_to_video', 'image_to_video'] },
+  }
+
+  const OK = (result) => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => JSON.stringify({ system: { code: '0', msg: 'success' }, result }),
+  })
+
+  function makeUpstream(replies = {}) {
+    const seen = []
+    const stub = async (url, init) => {
+      const path = String(url).replace('https://api-gateway.wasu.cn/tos/api/v1/open/', '')
+      if (path === 'pcweb/creation/upload') {
+        seen.push({ path, headers: init.headers, form: init.body })
+        return OK({ fileName: 'ref.png', filePath: 'app/U1/20260930/ali/ref.png', mimeType: 'image/png' })
+      }
+      const envelope = JSON.parse(init.body)
+      seen.push({ path, envelope, headers: init.headers })
+      if (path === 'pcweb/auth/init') return OK({ accessKey: ACCESS_KEY, csrfToken: CSRF, uid: 'U1' })
+      const reply = replies[path]
+      if (typeof reply === 'function') return reply(seen.filter((s) => s.path === path))
+      return OK(reply === undefined ? {} : reply)
+    }
+    return { stub, seen }
+  }
+
+  function bootHost(context = {}) {
+    const registered = []
+    const tools = []
+    const ctx = {
+      get: () => undefined,
+      effect: (fn) => { fn(); return () => {} },
+      emit: () => {},
+      logger: { warn: () => {}, error: () => {} },
+      webServer: { register(route) { registered.push(route); return () => {} } },
+      tools: { register(definition) { tools.push(definition); return () => {} } },
+      attachments: {
+        readImage: async () => { throw new Error('no image') },
+        readFileStream: async function * () {},
+        saveImage: async () => ({ attachmentId: 'a1' }),
+        saveFile: async () => ({ attachmentId: 'f1' }),
+        ...context.attachments,
+      },
+    }
+    apply(ctx)
+    return { handler: registered[0].handler, tools }
+  }
+
+  const makeReq = (method, url, body) => ({
+    method,
+    url,
+    async *[Symbol.asyncIterator]() {
+      if (body !== undefined) yield Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))
+    },
+  })
+  const makeRes = () => ({
+    statusCode: 200, headers: null, body: '', writableEnded: false,
+    writeHead(status, headers) { this.statusCode = status; this.headers = headers; return this },
+    end(text) { this.body = text; this.writableEnded = true; return this },
+  })
+  const call = async (handler, method, path, body) => {
+    const res = makeRes()
+    await handler(makeReq(method, '/dsh-tokenplan-bill' + path, body), res)
+    let json = null
+    try { json = JSON.parse(res.body) } catch { /* non-JSON */ }
+    return { status: res.statusCode, json, body: res.body }
+  }
+
+  const LOGGED_IN = { accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} }
+
+  it('registers both generation tools with the tool-registry contract', () => {
+    const { tools } = bootHost()
+    assert.deepEqual(tools.map((t) => t.name), ['generate_image', 'generate_video'])
+    for (const tool of tools) {
+      assert.equal(typeof tool.description, 'string')
+      assert.equal(tool.parameters.type, 'object')
+      assert.equal(tool.parameters.additionalProperties, false)
+      assert.deepEqual(tool.parameters.required, ['prompt'])
+      // The registry rejects a definition whose output lacks a render function.
+      assert.equal(typeof tool.output.render, 'function')
+      assert.equal(tool.output.schema.type, 'object')
+      assert.equal(typeof tool.execute, 'function')
+    }
+    const video = tools[1]
+    assert.ok(video.parameters.properties.mode.enum.includes('first_last_frame'))
+    assert.ok(video.parameters.properties.source_file_ids, 'video tools accept conversation video/audio files')
+  })
+
+  it('survives a tool-name clash with another generation plugin', () => {
+    // dsh-image-gen registers `generate_image` too; the registry rejects the
+    // second definition. That must not take the console panel down with it.
+    const warnings = []
+    const registered = []
+    const routes = []
+    apply({
+      get: () => undefined,
+      effect: (fn) => { fn(); return () => {} },
+      emit: () => {},
+      logger: { warn: (...args) => warnings.push(args), error: () => {} },
+      webServer: { register: (route) => { routes.push(route); return () => {} } },
+      tools: { register: (definition) => { registered.push(definition.name); throw new Error('tool "' + definition.name + '" is already registered') } },
+      attachments: { saveImage: async () => ({}), saveFile: async () => ({}) },
+    })
+    assert.deepEqual(registered, ['generate_image', 'generate_video'])
+    assert.equal(routes.length, 1, 'the HTTP routes still register')
+    assert.equal(warnings.length, 2)
+    assert.match(String(warnings[0][0]), /not registered/)
+  })
+
+  it('maps an image submission onto the AI创作 payload', async () => {
+    seedState(LOGGED_IN)
+    const { stub, seen } = makeUpstream({ 'pcweb/creation/models': [IMAGE_MODEL, VIDEO_MODEL] })
+    const { handler } = bootHost()
+    const r = await withFetch(stub, () => call(handler, 'POST', '/creation/submit', {
+      kind: 'image',
+      model: 'doubao-seedream-5.0-pro',
+      prompt: '一只猫',
+      ratio: '16:9',
+      resolution: '2K',
+      imageCount: 2,
+      watermark: true,
+      negativePrompt: '模糊',
+    }))
+    assert.equal(r.status, 200, r.body)
+    assert.equal(r.json.ok, true)
+    assert.equal(r.json.request.estimatedCost, 600)
+    const submit = seen.find((s) => s.path === 'pcweb/creation/submit')
+    assert.ok(submit, 'submit must reach the gateway page endpoint')
+    assert.deepEqual(submit.envelope.params, {
+      modelName: 'doubao-seedream-5.0-pro',
+      prompt: '一只猫',
+      templateType: 'IMAGE',
+      ratio: '16:9',
+      imageCount: 2,
+      watermark: true,
+      resolution: '2K',
+      resolutionLabel: '2K',
+      negativePrompt: '模糊',
+    })
+    seedState(null)
+  })
+
+  it('maps a video submission and derives the payload mode', async () => {
+    seedState(LOGGED_IN)
+    const { stub, seen } = makeUpstream({ 'pcweb/creation/models': [IMAGE_MODEL, VIDEO_MODEL] })
+    const { handler } = bootHost()
+    const r = await withFetch(stub, () => call(handler, 'POST', '/creation/submit', {
+      kind: 'video',
+      prompt: '日落延时',
+      videoMode: 'image_to_video',
+      duration: 10,
+      referenceFiles: [{ type: 'reference', url: 'app/U1/ref.png' }, { type: 'bogus', url: 'app/U1/x.png' }, { url: '' }],
+    }))
+    assert.equal(r.status, 200, r.body)
+    assert.equal(r.json.request.estimatedCost, 63500)
+    const submit = seen.find((s) => s.path === 'pcweb/creation/submit')
+    assert.equal(submit.envelope.params.templateType, 'VIDEO')
+    assert.equal(submit.envelope.params.videoMode, 'image_to_video')
+    assert.equal(submit.envelope.params.duration, 10)
+    assert.equal(submit.envelope.params.ratio, '16:9', 'falls back to a model-supported ratio')
+    assert.equal(submit.envelope.params.resolution, '720p')
+    // Unknown reference types degrade to `reference`, empty urls are dropped.
+    assert.deepEqual(submit.envelope.params.referenceFiles, [
+      { type: 'reference', url: 'app/U1/ref.png' },
+      { type: 'reference', url: 'app/U1/x.png' },
+    ])
+    seedState(null)
+  })
+
+  it('rejects a prompt-less submission and a model/kind mismatch before calling upstream', async () => {
+    seedState(LOGGED_IN)
+    const { stub, seen } = makeUpstream({ 'pcweb/creation/models': [IMAGE_MODEL, VIDEO_MODEL] })
+    const { handler } = bootHost()
+    await withFetch(stub, async () => {
+      const empty = await call(handler, 'POST', '/creation/submit', { kind: 'image', prompt: '  ' })
+      assert.equal(empty.status, 400)
+      assert.match(empty.json.error, /提示词/)
+      const mismatch = await call(handler, 'POST', '/creation/submit', {
+        kind: 'video', model: 'doubao-seedream-5.0-pro', prompt: 'x',
+      })
+      assert.equal(mismatch.status, 400)
+      assert.match(mismatch.json.error, /不支持视频/)
+      const unknown = await call(handler, 'POST', '/creation/submit', { kind: 'image', model: 'nope', prompt: 'x' })
+      assert.equal(unknown.status, 400)
+      assert.match(unknown.json.error, /未知模型/)
+    })
+    assert.equal(seen.filter((s) => s.path === 'pcweb/creation/submit').length, 0)
+    seedState(null)
+  })
+
+  it('merges drive AI作品 with generation records and dedupes by media URL', async () => {
+    seedState(LOGGED_IN)
+    const shared = 'https://file.smartlink.wasu.cn/group1/dup.png'
+    const { stub, seen } = makeUpstream({
+      'pcweb/clouddisk/file/ai-assets': {
+        counts: { doc: 0, photos: 1, videos: 0 },
+        files: {
+          pageNum: 1,
+          total: 1,
+          list: [{ fileId: 1, name: '云盘作品', fileType: 1, fileAddress: 'app/U1/dup.png', createTime: '2026-09-30 10:00:00' }],
+        },
+      },
+      'pcweb/clouddisk/file/download/url': shared,
+      'pcweb/creation/tasks': {
+        data: [
+          { taskId: 'dup', status: 'succeeded', templateType: 'IMAGE', prompt: '同一张', localResultUrls: JSON.stringify([shared]), createdTime: '2026-09-30 09:00:00' },
+          { taskId: 'other', status: 'succeeded', templateType: 'VIDEO', prompt: '另一段', localResultUrls: '["https://file.smartlink.wasu.cn/group1/b.mp4"]', paramsConfig: '{"duration":5}', createdTime: '2026-09-29 09:00:00' },
+        ],
+        total: 2,
+      },
+    })
+    const { handler } = bootHost()
+    const r = await withFetch(stub, () => call(handler, 'GET', '/gallery?page=1&size=10'))
+    assert.equal(r.status, 200, r.body)
+    assert.equal(r.json.ok, true)
+    assert.equal(r.json.total, 2, 'the duplicated generation collapses into the drive row')
+    assert.deepEqual(r.json.items.map((i) => i.id), ['asset:1', 'task:other'])
+    assert.deepEqual(r.json.counts, { all: 2, image: 1, video: 1, file: 0, pending: 0 })
+    assert.equal(r.json.sources.drive.ok, true)
+    assert.equal(r.json.sources.tasks.ok, true)
+    // The drive row carries the signed URL from the cloud namespace.
+    assert.equal(r.json.items[0].url, shared)
+    // The cloud read uses the cloud signature family: accessKey, no accessToken.
+    const cloud = seen.find((s) => s.path === 'pcweb/clouddisk/file/ai-assets')
+    assert.equal(cloud.envelope.system.accessToken, undefined)
+    assert.equal(cloud.envelope.system.accessKey, ACCESS_KEY)
+    seedState(null)
+  })
+
+  it('collapses an archived work whose task link is a differently signed URL', async () => {
+    // Real-world shape: the drive holds the object key, while the task row
+    // carries a short-lived OSS STS link to the same file name.
+    seedState(LOGGED_IN)
+    const signed = 'https://ihomeapp-cloudalbum-oss.oss-cn-hangzhou.aliyuncs.com/app%2FU1%2F20260930%2Fali%2Faigc_1_0.jpg?Expires=1&Signature=x'
+    const { stub } = makeUpstream({
+      'pcweb/clouddisk/file/ai-assets': {
+        counts: { doc: 0, photos: 1, videos: 0 },
+        files: {
+          pageNum: 1,
+          total: 1,
+          list: [{ fileId: 7, name: 'aigc_1_0.jpg', fileType: 1, fileAddress: 'app/U1/20260930/ali/aigc_1_0.jpg', createTime: '2026-09-30 10:00:00' }],
+        },
+      },
+      'pcweb/clouddisk/file/download/url': 'https://file.smartlink.wasu.cn/group1/signed.jpg?e=1',
+      'pcweb/creation/tasks': {
+        data: [{ taskId: 'gen_1', status: 'succeeded', templateType: 'IMAGE', prompt: '同一张', localResultUrls: JSON.stringify([signed]), createdTime: '2026-09-30 09:00:00' }],
+        total: 1,
+      },
+    })
+    const { handler } = bootHost()
+    const r = await withFetch(stub, () => call(handler, 'GET', '/gallery?page=1&size=10'))
+    assert.equal(r.json.total, 1, 'the expiring task link must not duplicate the archived copy')
+    assert.deepEqual(r.json.items.map((i) => i.id), ['asset:7'])
+    seedState(null)
+  })
+
+  it('honours the gallery source and kind filters', async () => {
+    seedState(LOGGED_IN)
+    const { stub, seen } = makeUpstream({
+      'pcweb/clouddisk/file/ai-assets': { counts: {}, files: { pageNum: 1, total: 0, list: [] } },
+      'pcweb/creation/tasks': { data: [], total: 0 },
+    })
+    const { handler } = bootHost()
+    await withFetch(stub, async () => {
+      const driveOnly = await call(handler, 'GET', '/gallery?source=drive')
+      assert.equal(driveOnly.json.sources.tasks, undefined)
+      assert.equal(driveOnly.json.sources.drive.ok, true)
+      seen.length = 0
+      await call(handler, 'GET', '/gallery?source=tasks&kind=video')
+      const tasks = seen.find((s) => s.path === 'pcweb/creation/tasks')
+      assert.equal(tasks.envelope.params.templateType, 'VIDEO')
+      assert.equal(seen.find((s) => s.path === 'pcweb/clouddisk/file/ai-assets'), undefined)
+      seen.length = 0
+      await call(handler, 'GET', '/gallery?kind=image')
+      assert.equal(seen.find((s) => s.path === 'pcweb/clouddisk/file/ai-assets').envelope.params.type, 'photo')
+      assert.equal(seen.find((s) => s.path === 'pcweb/creation/tasks').envelope.params.templateType, 'IMAGE')
+    })
+    seedState(null)
+  })
+
+  it('rejects an unauthenticated gallery read', async () => {
+    seedState(null)
+    const { handler } = bootHost()
+    const r = await call(handler, 'GET', '/gallery')
+    assert.equal(r.status, 401)
+  })
+
+  it('uploads reference material as a header-only multipart POST', async () => {
+    seedState(LOGGED_IN)
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const { stub, seen } = makeUpstream({})
+    const { handler } = bootHost()
+    const r = await withFetch(stub, () => call(handler, 'POST', '/creation/upload', {
+      name: 'ref.png', contentType: 'image/png', data: png,
+    }))
+    assert.equal(r.status, 200, r.body)
+    assert.equal(r.json.filePath, 'app/U1/20260930/ali/ref.png')
+    const upload = seen.find((s) => s.path === 'pcweb/creation/upload')
+    assert.ok(upload, 'upload must not go through the signed envelope path')
+    assert.equal(upload.envelope, undefined)
+    assert.equal(upload.headers.accessToken, TOKEN)
+    assert.equal(upload.headers['X-CSRF-TOKEN'], undefined)
+    assert.ok(upload.form instanceof FormData)
+    seedState(null)
+  })
+
+  it('validates the upload payload before touching the network', async () => {
+    seedState(LOGGED_IN)
+    const { stub, seen } = makeUpstream({})
+    const { handler } = bootHost()
+    await withFetch(stub, async () => {
+      assert.equal((await call(handler, 'POST', '/creation/upload', {})).status, 400)
+      assert.equal((await call(handler, 'POST', '/creation/upload', { data: '!!!not-base64!!!' })).status, 400)
+      const empty = await call(handler, 'POST', '/creation/upload', { data: '' })
+      assert.equal(empty.status, 400)
+      assert.match(empty.json.error, /缺少文件数据/)
+    })
+    assert.equal(seen.filter((s) => s.path === 'pcweb/creation/upload').length, 0)
+    seedState(null)
+  })
+
+  it('serves one task by id and reports a miss as 404', async () => {
+    seedState(LOGGED_IN)
+    const { stub } = makeUpstream({
+      'pcweb/creation/tasks': {
+        data: [{ taskId: 'gen_9', status: 'processing', progress: '30%', templateType: 'IMAGE', prompt: 'x' }],
+        total: 1,
+      },
+    })
+    const { handler } = bootHost()
+    await withFetch(stub, async () => {
+      const found = await call(handler, 'GET', '/creation/task?taskId=gen_9')
+      assert.equal(found.status, 200)
+      assert.equal(found.json.task.pending, true)
+      assert.equal(found.json.task.progress, '30%')
+      const missing = await call(handler, 'GET', '/creation/task?taskId=gen_x')
+      assert.equal(missing.status, 404)
+      const noId = await call(handler, 'GET', '/creation/task')
+      assert.equal(noId.status, 400)
+    })
+    seedState(null)
+  })
+})
+
+/**
+ * Generation tools, end to end: conversation attachments become uploaded
+ * reference material, the task is submitted, polled and attached back.
+ */
+describe('generation tools', () => {
+  const TOKEN = 'JWT.ACCOUNT.TOKEN'
+  const ACCESS_KEY = 'cloud-access-key-64'
+  const CSRF = 'cloud-csrf-64'
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const MODEL = {
+    modelName: 'doubao-seedream-5.0-pro',
+    modelType: 'image',
+    imageQuotaPerUnit: 300,
+    modelParams: { ratios: ['1:1'], resolutions: ['1k'], maxImages: 4, capabilities: [] },
+  }
+
+  const OK = (result) => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => JSON.stringify({ system: { code: '0', msg: 'success' }, result }),
+  })
+  const binary = (bytes) => ({ ok: true, status: 200, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) })
+
+  /**
+   * Upstream stub where the task only becomes visible on the Nth tasks read,
+   * which is exactly how a real submission surfaces through `creation/tasks`.
+   */
+  function makeUpstream(options = {}) {
+    const seen = []
+    let taskReads = 0
+    const stub = async (url, init) => {
+      const path = String(url).replace('https://api-gateway.wasu.cn/tos/api/v1/open/', '')
+      if (path === 'pcweb/creation/upload') {
+        seen.push({ path, headers: init.headers, form: init.body })
+        return OK({ fileName: 'ref.png', filePath: 'app/U1/ref.png' })
+      }
+      if (/^https:\/\/file\.smartlink\.wasu\.cn\//.test(path)) {
+        seen.push({ path })
+        return binary(options.resultBytes || PNG)
+      }
+      const envelope = JSON.parse(init.body)
+      seen.push({ path, envelope, headers: init.headers })
+      if (path === 'pcweb/auth/init') return OK({ accessKey: ACCESS_KEY, csrfToken: CSRF, uid: 'U1' })
+      if (path === 'pcweb/creation/tasks') {
+        taskReads += 1
+        // First read is the pre-submit snapshot; the task appears afterwards.
+        if (taskReads === 1) return OK({ data: [], total: 0 })
+        return OK({
+          data: [{
+            taskId: 'gen_new',
+            status: options.status || 'succeeded',
+            templateType: options.taskTemplateType || 'IMAGE',
+            modelName: options.taskModel || 'doubao-seedream-5.0-pro',
+            prompt: options.prompt || '一只猫',
+            localResultUrls: '["https://file.smartlink.wasu.cn/group1/out.png"]',
+            createdTime: '2026-09-30 09:00:00',
+          }],
+          total: 1,
+        })
+      }
+      if (path === 'pcweb/creation/models') return OK(options.models || [MODEL])
+      return OK({})
+    }
+    return { stub, seen }
+  }
+
+  function bootHost(overrides = {}) {
+    const registered = []
+    const tools = []
+    const saved = []
+    const ctx = {
+      get: () => undefined,
+      effect: (fn) => { fn(); return () => {} },
+      emit: () => {},
+      logger: { warn: () => {}, error: () => {} },
+      webServer: { register(route) { registered.push(route); return () => {} } },
+      tools: { register(definition) { tools.push(definition); return () => {} } },
+      attachments: {
+        readImage: async () => ({ ref: { attachmentId: 'img-1', mediaType: 'image/png' }, data: PNG }),
+        readFileStream: async function * () { yield PNG },
+        saveImage: async (input) => { saved.push({ kind: 'image', input }); return { attachmentId: 'saved-img' } },
+        saveFile: async (input) => { saved.push({ kind: 'file', input }); return { attachmentId: 'saved-file' } },
+        ...overrides.attachments,
+      },
+    }
+    apply(ctx)
+    return { tools, saved, handler: registered[0].handler }
+  }
+
+  /** Minimal DSH agent surface: deriveMessages() plus a human message. */
+  const agentWith = (content) => ({
+    session: { deriveMessages: () => [{ source: { kind: 'user' }, content }] },
+  })
+
+  const exec = (agent) => ({ agent, signal: new AbortController().signal, callId: 'c1', name: 'x', arguments: {} })
+
+  it('uploads conversation images, submits, polls and attaches the result', async () => {
+    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
+    const { stub, seen } = makeUpstream({ prompt: '一只猫' })
+    const { tools, saved } = bootHost()
+    const tool = tools.find((t) => t.name === 'generate_image')
+
+    const value = await withFetch(stub, () => tool.execute(
+      { prompt: '一只猫' },
+      exec(agentWith([{ type: 'image', attachment: { attachmentId: 'img-1', mediaType: 'image/png' } }])),
+    ))
+
+    assert.equal(value.ok, true)
+    assert.equal(value.taskId, 'gen_new')
+    assert.deepEqual(value.urls, ['https://file.smartlink.wasu.cn/group1/out.png'])
+    assert.equal(typeof value.elapsedMs, 'number')
+
+    // The conversation image reached the upstream as uploaded reference material.
+    const upload = seen.find((s) => s.path === 'pcweb/creation/upload')
+    assert.ok(upload, 'the attached conversation image must be uploaded first')
+    assert.equal(upload.headers.accessToken, TOKEN)
+    const submit = seen.find((s) => s.path === 'pcweb/creation/submit')
+    assert.deepEqual(submit.envelope.params.referenceFiles, [{ type: 'reference', url: 'app/U1/ref.png' }])
+    assert.equal(submit.envelope.params.templateType, 'IMAGE')
+
+    // The produced media is attached back for inline rendering.
+    assert.equal(saved.length, 1)
+    assert.equal(saved[0].kind, 'image')
+    assert.equal(saved[0].input.mediaType, 'image/png')
+    const imageBlocks = value.content.filter((b) => b.type === 'image')
+    assert.equal(imageBlocks.length, 1)
+    assert.equal(imageBlocks[0].attachment.attachmentId, 'saved-img')
+    assert.match(value.content[0].text, /图片生成完成/)
+
+    // The registry derives the model-facing content from `output.render`, not
+    // from the returned value's own shape: a projection that drops the media
+    // makes the tool result empty — the model sees nothing and the conversation
+    // shows nothing. That is exactly the regression this assertion pins down.
+    const projected = tool.output.render({ prompt: '一只猫' }, value)
+    assert.deepEqual(projected, value.content)
+    assert.equal(projected.filter((b) => b.type === 'image').length, 1)
+    const meta = tool.output.presentationMeta({ prompt: '一只猫' }, value)
+    assert.equal(meta.kind, 'image')
+    assert.equal(meta.taskId, 'gen_new')
+    assert.deepEqual(meta.urls, ['https://file.smartlink.wasu.cn/group1/out.png'])
+    seedState(null)
+    delete process.env.TOKENPLAN_BILL_POLL_MS
+  })
+
+  it('attaches every produced image of a multi-image batch', async () => {
+    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
+    let tasksRead = 0
+    const stub = async (url, init) => {
+      const path = String(url).replace('https://api-gateway.wasu.cn/tos/api/v1/open/', '')
+      if (/^https:\/\/file\.smartlink\.wasu\.cn\//.test(path)) return binary(PNG)
+      const envelope = JSON.parse(init.body)
+      if (path === 'pcweb/auth/init') return OK({ accessKey: ACCESS_KEY, csrfToken: CSRF, uid: 'U1' })
+      if (path === 'pcweb/creation/tasks') {
+        // The first read is the pre-submit snapshot; the batch appears after it.
+        if (tasksRead < 1) { tasksRead += 1; return OK({ data: [], total: 0 }) }
+        tasksRead += 1
+        return OK({
+          data: [{
+            taskId: 'gen_batch',
+            status: 'succeeded',
+            templateType: 'IMAGE',
+            modelName: 'doubao-seedream-5.0-pro',
+            prompt: '四张猫',
+            localResultUrls: JSON.stringify([
+              'https://file.smartlink.wasu.cn/group1/a.png',
+              'https://file.smartlink.wasu.cn/group1/b.png',
+              'https://file.smartlink.wasu.cn/group1/c.png',
+            ]),
+            createdTime: '2026-09-30 09:00:00',
+          }],
+          total: 1,
+        })
+      }
+      if (path === 'pcweb/creation/models') return OK([MODEL])
+      return OK({})
+    }
+    const { tools, saved } = bootHost()
+    const tool = tools.find((t) => t.name === 'generate_image')
+
+    const value = await withFetch(stub, () => tool.execute({ prompt: '四张猫' }, exec(agentWith([]))))
+    assert.equal(saved.length, 3)
+    assert.deepEqual(
+      value.content.filter((b) => b.type === 'image').map((b) => b.attachment.attachmentId),
+      ['saved-img', 'saved-img', 'saved-img'],
+    )
+    assert.deepEqual(value.urls, [
+      'https://file.smartlink.wasu.cn/group1/a.png',
+      'https://file.smartlink.wasu.cn/group1/b.png',
+      'https://file.smartlink.wasu.cn/group1/c.png',
+    ])
+    seedState(null)
+    delete process.env.TOKENPLAN_BILL_POLL_MS
+  })
+
+  it('submits without references when the conversation carries no attachment', async () => {
+    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
+    const { stub, seen } = makeUpstream({ prompt: '一只猫' })
+    const { tools } = bootHost()
+    const tool = tools.find((t) => t.name === 'generate_image')
+
+    const value = await withFetch(stub, () => tool.execute({ prompt: '一只猫' }, exec(agentWith([{ type: 'text', text: 'hi' }]))))
+    assert.equal(value.ok, true)
+    assert.equal(seen.find((s) => s.path === 'pcweb/creation/upload'), undefined)
+    const submit = seen.find((s) => s.path === 'pcweb/creation/submit')
+    assert.equal(submit.envelope.params.referenceFiles, undefined)
+    seedState(null)
+    delete process.env.TOKENPLAN_BILL_POLL_MS
+  })
+
+  it('surfaces a failed task instead of a bogus success', async () => {
+    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
+    const { stub } = makeUpstream({ status: 'failed', prompt: '一只猫' })
+    const { tools } = bootHost()
+    const tool = tools.find((t) => t.name === 'generate_image')
+    await withFetch(stub, async () => {
+      await assert.rejects(
+        () => tool.execute({ prompt: '一只猫' }, exec(agentWith([]))),
+        /生成失败/,
+      )
+    })
+    seedState(null)
+    delete process.env.TOKENPLAN_BILL_POLL_MS
+  })
+
+  it('refuses to generate while the AI Store session is absent', async () => {
+    seedState(null)
+    const { tools } = bootHost()
+    const tool = tools.find((t) => t.name === 'generate_image')
+    await assert.rejects(() => tool.execute({ prompt: 'x' }, exec(agentWith([]))), /未登录/)
+  })
+
+  it('derives the video mode from the reference material the user attached', async () => {
+    process.env.TOKENPLAN_BILL_POLL_MS = '1'
+    seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
+    const { stub, seen } = makeUpstream({
+      prompt: '动起来',
+      status: 'succeeded',
+      taskModel: 'doubao-seedance-2.5',
+      taskTemplateType: 'VIDEO',
+      models: [MODEL, {
+        modelName: 'doubao-seedance-2.5',
+        modelType: 'video',
+        videoQuotaPerSecond: 6350,
+        modelParams: { ratios: ['16:9'], resolutions: ['720p'], durations: [5, 10], capabilities: ['text_to_video', 'image_to_video'] },
+      }],
+    })
+    const { tools } = bootHost({
+      attachments: { readFileStream: async function * () { yield Buffer.from('fake-mp4-bytes') } },
+    })
+    const tool = tools.find((t) => t.name === 'generate_video')
+
+    await withFetch(stub, () => tool.execute(
+      { prompt: '动起来' },
+      exec(agentWith([{ type: 'file', attachment: { attachmentId: 'vid-1', name: 'clip.mp4', bytes: 14 } }])),
+    ))
+
+    const submit = seen.find((s) => s.path === 'pcweb/creation/submit')
+    assert.equal(submit.envelope.params.templateType, 'VIDEO')
+    assert.equal(submit.envelope.params.videoMode, 'file_upload')
+    assert.deepEqual(submit.envelope.params.referenceFiles, [{ type: 'file', url: 'app/U1/ref.png' }])
+    seedState(null)
+    delete process.env.TOKENPLAN_BILL_POLL_MS
+  })
+})
+
+describe('generation tool cancellation', () => {
+  const TOKEN = 'JWT.ACCOUNT.TOKEN'
+  const MODEL = {
+    modelName: 'doubao-seedream-5.0-pro',
+    modelType: 'image',
+    imageQuotaPerUnit: 300,
+    modelParams: { ratios: ['1:1'], resolutions: ['1k'], maxImages: 4, capabilities: [] },
+  }
+  const OK = (result) => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => JSON.stringify({ system: { code: '0', msg: 'success' }, result }),
+  })
+
+  it('stops polling and reports cancellation when the caller signal is already aborted', async () => {
+    seedState({ accessToken: TOKEN, refreshToken: 'R', uid: 'U1', prefs: {} })
+    const tools = []
+    const registered = []
+    apply({
+      get: () => undefined,
+      effect: (fn) => { fn(); return () => {} },
+      emit: () => {},
+      logger: { warn: () => {}, error: () => {} },
+      webServer: { register: (route) => { registered.push(route); return () => {} } },
+      tools: { register: (definition) => { tools.push(definition); return () => {} } },
+      attachments: {
+        readImage: async () => ({ ref: {}, data: Buffer.from([1]) }),
+        readFileStream: async function * () {},
+        saveImage: async () => ({}),
+        saveFile: async () => ({}),
+      },
+    })
+    let submitCalls = 0
+    const stub = async (url, init) => {
+      const path = String(url).replace('https://api-gateway.wasu.cn/tos/api/v1/open/', '')
+      if (path === 'pcweb/auth/init') return OK({ accessKey: 'k', csrfToken: 'c' })
+      if (path === 'pcweb/creation/models') return OK([MODEL])
+      if (path === 'pcweb/creation/tasks') return OK({ data: [], total: 0 })
+      if (path === 'pcweb/creation/submit') { submitCalls += 1; return OK({}) }
+      return OK({})
+    }
+    const controller = new AbortController()
+    controller.abort()
+    const tool = tools.find((t) => t.name === 'generate_image')
+    await withFetch(stub, async () => {
+      await assert.rejects(
+        () => tool.execute({ prompt: '一只猫' }, {
+          agent: { session: { deriveMessages: () => [] } },
+          signal: controller.signal,
+          callId: 'c1',
+          name: 'generate_image',
+          arguments: {},
+        }),
+        /已取消/,
+      )
+    })
+    // The submission itself still went out (cancellation is checked in the poll
+    // loop), but the call must not report a bogus success afterwards.
+    assert.equal(submitCalls, 1)
+    seedState(null)
   })
 })

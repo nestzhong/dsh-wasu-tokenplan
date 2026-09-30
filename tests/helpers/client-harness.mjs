@@ -60,6 +60,17 @@ export function loadClient(options = {}) {
   }
   const { fetchStub, calls } = createFetchStub(options.routes || [])
 
+  /** Minimal `FileReader` double: `readAsDataURL` always succeeds. */
+  class FileReaderStub {
+    constructor() { this.result = null; this.error = null; this.onload = null; this.onerror = null }
+    readAsDataURL(file) {
+      Promise.resolve().then(() => {
+        this.result = 'data:' + (file.type || 'application/octet-stream') + ';base64,' + Buffer.from(String(file.name)).toString('base64')
+        if (typeof this.onload === 'function') this.onload()
+      })
+    }
+  }
+
   let loaded = null
   const sandbox = {
     console,
@@ -83,8 +94,10 @@ export function loadClient(options = {}) {
     encodeURIComponent,
     decodeURIComponent,
     AbortController,
+    URLSearchParams,
     Symbol,
     fetch: fetchStub,
+    FileReader: FileReaderStub,
     document: documentStub,
     navigator: { clipboard: { writeText: async () => {} } },
     window: {

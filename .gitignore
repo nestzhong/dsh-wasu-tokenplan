@@ -8,3 +8,6 @@ dist/
 .DS_Store
 tokenplan-bill-state.json
 .tokenplan-bill-state.json
+
+# local generation output from manual testing
+generated/

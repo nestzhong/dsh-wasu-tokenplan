@@ -168,6 +168,54 @@ if (cmd === 'signcheck') {
     channel: 'pcweb-yunpan',
   })
   show('file/home', home.unwrapped.ok ? home.unwrapped.data : home.json)
+} else if (cmd === 'creation-catalog') {
+  const r = await tosPost('pcweb/creation/models', {}, { noAuth: true })
+  const rows = Array.isArray(r.unwrapped.data) ? r.unwrapped.data : []
+  console.log('creation models', rows.length)
+  for (const m of rows) {
+    const p = m.modelParams || {}
+    console.log([
+      m.modelName,
+      m.modelType,
+      m.imageQuotaPerUnit ? m.imageQuotaPerUnit + '/张' : '',
+      m.videoQuotaPerSecond ? m.videoQuotaPerSecond + '/秒' : '',
+      'ratio=' + (p.ratios || []).join(','),
+      'res=' + (p.resolutions || []).join(','),
+      'dur=' + (p.durations || []).join(','),
+      'caps=' + (p.capabilities || []).join(','),
+    ].filter(Boolean).join(' | '))
+  }
+} else if (cmd === 'gallery') {
+  const st = loadAuth()
+  if (!st?.accessToken) {
+    console.error('no saved auth — run login first')
+    process.exit(1)
+  }
+  const init = await tosPost('pcweb/auth/init', {}, { accessToken: st.accessToken })
+  const accessKey = init.unwrapped.ok ? init.unwrapped.data?.accessKey : ''
+  const csrf = init.unwrapped.ok ? (init.unwrapped.data?.csrfToken || init.unwrapped.data?.csrf || '') : ''
+  const cloudOpts = { accessToken: '', accessKey, secret: st.accessToken, csrf, channel: 'pcweb-yunpan' }
+
+  const ai = await tosPost('pcweb/clouddisk/file/ai-assets', { pageNum: 1, pageSize: 20 }, cloudOpts)
+  const aiData = ai.unwrapped.ok ? ai.unwrapped.data : {}
+  const aiList = aiData?.files?.list || []
+  console.log('AI作品 (clouddisk/file/ai-assets): ok=%s counts=%s list=%d',
+    ai.unwrapped.ok, JSON.stringify(aiData?.counts), aiList.length)
+  for (const row of aiList.slice(0, 5)) {
+    console.log('  ', row.fileId, 'type=' + row.fileType, row.name, row.fileAddress)
+  }
+
+  // Authenticated `pcweb/*` calls sign with the ACCOUNT TOKEN as the secret.
+  const tasks = await tosPost('pcweb/creation/tasks', { page: 1, size: 20 }, {
+    accessToken: st.accessToken, accessKey, csrf, secret: st.accessToken,
+  })
+  const rows = tasks.unwrapped.ok && Array.isArray(tasks.unwrapped.data?.data) ? tasks.unwrapped.data.data : []
+  console.log('生成记录 (creation/tasks): ok=%s rows=%d', tasks.unwrapped.ok, rows.length)
+  for (const row of rows.slice(0, 5)) {
+    const local = (() => { try { return JSON.parse(row.localResultUrls || '[]') } catch { return [] } })()
+    console.log('  ', row.taskId, row.templateType, row.status, row.progress, row.modelName,
+      'local=' + (local[0] ? local[0].slice(0, 60) : '(none)'))
+  }
 } else {
-  console.log('usage: sms|login|dash|models|keys|drive|signcheck')
+  console.log('usage: sms|login|dash|models|keys|drive|creation-catalog|gallery|signcheck')
 }

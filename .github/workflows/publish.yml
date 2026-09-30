@@ -8,9 +8,10 @@ name: Publish to npm
 #     「Bypass 2FA」，否则 npm publish 会报 EOTP / 403。
 #   - token 权限至少需要 read+write 该包（首次发布需能新建包）。
 #
-# 注意：本仓库是私有仓库，因此**不能**使用 npm provenance（GitHub 已停止支持从私有源
-# 仓库生成 provenance）。若将来仓库转为公开，可给 publish 步骤加上 `--provenance`
-# 并为本 job 声明 `id-token: write`。
+# 注意：仓库已公开，所以发布时开启 npm provenance（来源证明），npm 包页面会显示
+# verified 标识，可回溯到这次 Actions 运行与确切 commit。provenance 需要本 job 声明
+# `id-token: write`，并要求 package.json 的 repository 字段与 GitHub 仓库一致。
+# 只想预演时用 dry_run（dry-run 不生成 provenance）。
 
 on:
   workflow_dispatch:
@@ -48,6 +49,8 @@ jobs:
     permissions:
       # 只有 create_release 步骤需要写权限（打 tag / 建 Release）
       contents: write
+      # npm provenance 走 GitHub OIDC 换取 Sigstore 签名证书
+      id-token: write
 
     steps:
       - name: Checkout
@@ -116,10 +119,10 @@ jobs:
           set -euo pipefail
 
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            echo "::notice::dry-run 模式：不会真正发布"
+            echo "::notice::dry-run 模式：不会真正发布（不生成 provenance）"
             npm publish --dry-run --access public --tag "${{ inputs.npm_tag }}"
           else
-            npm publish --access public --tag "${{ inputs.npm_tag }}"
+            npm publish --provenance --access public --tag "${{ inputs.npm_tag }}"
             echo "::notice::已发布 ${{ steps.version.outputs.name }}@${{ steps.version.outputs.version }}（${{ inputs.npm_tag }}）"
           fi
 

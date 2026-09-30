@@ -138,7 +138,7 @@ AI 优化提示词、提交后实时轮询进度、缩略图预览与灯箱、�
 # npm（已发布版本）
 dsh plugin --profile web add dsh-wasu-tokenplan
 
-# GitHub（私有仓库，走本机 git 凭据）
+# GitHub
 dsh plugin --profile web add github:nestzhong/dsh-wasu-tokenplan
 
 # 本地目录
@@ -161,11 +161,12 @@ dsh plugin --profile web add ./dsh-wasu-tokenplan-0.7.0.tgz
    - `dry_run`：只跑测试 + `npm publish --dry-run`，不真正发版
    - `create_release`：发布成功后自动打 `v<version>` tag 并建 GitHub Release
 3. 工作流按顺序执行：`npm test`（不过不发版）→ 校验 `NPM_TOKEN` → 检查该版本是否已存在于
-   npm（存在则直接失败，避免 403/覆盖）→ `npm publish --access public` → 建 Release
+   npm（存在则直接失败，避免 403/覆盖）→ `npm publish --provenance --access public` → 建 Release
 
 前置条件：仓库 secret `NPM_TOKEN`（npm 账号开了 2FA 时必须用 **Automation** token，或
-Granular access token 且勾选 *Bypass 2FA*）。本仓库是私有仓库，因此不能用 npm provenance；
-若将来仓库转公开，可给 `npm publish` 加 `--provenance` 并声明 `id-token: write`。
+Granular access token 且勾选 *Bypass 2FA*）。仓库已公开，所以发布时带 `--provenance`：
+npm 包页面会出现 verified 标识，可回溯到这次 Actions 运行与确切 commit（依赖
+`package.json` 的 `repository` 与 `id-token: write`）。
 
 ## 使用
 
